@@ -2,12 +2,13 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import numpy as np
 import cv2
-import math
 import os
+from moviepy.editor import VideoFileClip
 
 
 def grayscale(img):
-    """Applies the Grayscale transform
+    """ PREPARED FUNCTION
+    Applies the Grayscale transform
     This will return an image with only one color channel
     but NOTE: to see the returned image as grayscale
     (assuming your grayscaled image is called 'gray')
@@ -18,17 +19,19 @@ def grayscale(img):
 
 
 def canny(img, low_threshold, high_threshold):
-    """Applies the Canny transform"""
+    """ PREPARED FUNCTION
+    Applies the Canny transform"""
     return cv2.Canny(img, low_threshold, high_threshold)
 
 
 def gaussian_blur(img, kernel_size):
-    """Applies a Gaussian Noise kernel"""
+    """ PREPARED FUNCTION
+    Applies a Gaussian Noise kernel"""
     return cv2.GaussianBlur(img, (kernel_size, kernel_size), 0)
 
 
 def region_of_interest(img, vertices):
-    """
+    """ PREPARED FUNCTION
     Applies an image mask.
 
     Only keeps the region of the image defined by the polygon
@@ -53,43 +56,63 @@ def region_of_interest(img, vertices):
 
 
 def draw_lines(img, lines, color=[255, 0, 0], thickness=2):
-    """
-    NOTE: this is the function you might want to use as a starting point once you want to
-    average/extrapolate the line segments you detect to map out the full
-    extent of the lane (going from the result shown in raw-lines-example.mp4
-    to that shown in P1_example.mp4).
-
-    Think about things like separating line segments by their
-    slope ((y2-y1)/(x2-x1)) to decide which segments are part of the left
-    line vs. the right line.  Then, you can average the position of each of
-    the lines and extrapolate to the top and bottom of the lane.
-
+    """ PREPARED FUNCTION
     This function draws `lines` with `color` and `thickness`.
     Lines are drawn on the image inplace (mutates the image).
-    If you want to make the lines semi-transparent, think about combining
-    this function with the weighted_img() function below
     """
     for line in lines:
         for x1, y1, x2, y2 in line:
             cv2.line(img, (x1, y1), (x2, y2), color, thickness)
 
 
-def hough_lines(img, rho, theta, threshold, min_line_len, max_line_gap):
+def draw_weighted_line(img, line, color=[255, 0, 0], thickness=10):
     """
+    Draw weighted line on image
+    :param img:
+    :param line: in format as 4 points x0 = line[0], y0 = line[1], x1 = line[2], y1 = line[3]
+    :param color:
+    :param thickness:
+    :return:
+    """
+    img_shape = img.shape
+    line_img = np.zeros((img_shape[0], img_shape[1], 3), dtype=np.uint8)
+    cv2.line(line_img, (line[0], line[1]), (line[2], line[3]), color, thickness)
+    img_weighted = weighted_img(line_img, img)
+
+    return img_weighted
+
+
+def hough_lines(img, rho, theta, threshold, min_line_len, max_line_gap):
+    """ PREPARED FUNCTION
     `img` should be the output of a Canny transform.
 
-    Returns an image with hough lines drawn.
+    Returns lines found by hough transform
     """
     lines = cv2.HoughLinesP(img, rho, theta, threshold, np.array([]), minLineLength=min_line_len,
                             maxLineGap=max_line_gap)
-    line_img = np.zeros((img.shape[0], img.shape[1], 3), dtype=np.uint8)
-    draw_lines(line_img, lines)
-    return line_img, lines
+    return lines
 
 
-# Python 3 has support for cool math symbols.
-def weighted_img(img, initial_img, alpha=0.8, beta=1., l=0.):
+def hough_lines_visualize(lines, shape, color=[255, 0, 0], thickness=2):
     """
+    Function to visualize hough_lines() results on the picture
+    :param lines: lines obtained by hough_lines function
+    :param shape: shape of the source picture
+    :param color:
+    :param thickness:
+    :return: line_img : picture with lines only
+    """
+    line_img = np.zeros((shape[0], shape[1], 3), dtype=np.uint8)
+
+    for line in lines:
+        for x1, y1, x2, y2 in line:
+            cv2.line(line_img, (x1, y1), (x2, y2), color, thickness)
+
+    return line_img
+
+
+def weighted_img(img, initial_img, alpha=0.8, beta=1., lam=0.):
+    """ PREPARED FUNCTION
     `img` is the output of the hough_lines(), An image with lines drawn on it.
     Should be a blank image (all black) with lines drawn on it.
 
@@ -100,140 +123,204 @@ def weighted_img(img, initial_img, alpha=0.8, beta=1., l=0.):
     initial_img * α + img * β + λ
     NOTE: initial_img and img must be the same shape!
     """
-    return cv2.addWeighted(initial_img, alpha, img, beta, l)
+    return cv2.addWeighted(initial_img, alpha, img, beta, lam)
 
 
-def line_angle(lines):
+def separate_line_points(lines, shape):
     """
-    REWRITE
-    lines are input data in format [x1, y1, x2, y2];
-    result is angle between line and OX axis
+    Separate line points in 2 classes: left line points and right line points
+    lines are input data in format [x0 x1 y0 y1]
+    :param lines: lines to separate on 2 classes
+    :param shape: shape of the source picture
+    :return: line_points_l, line_points_r -- arrays of points sorted by left and right sides
     """
-    angle = []
+    n = lines.shape[0]
+
+    # predefine arrays size trying not to change size every iteration, will cut off later
+    line_points_l = np.empty([n, 4], dtype=int)
+    line_points_r = np.empty([n, 4], dtype=int)
+
+    l_cnt = 0
+    r_cnt = 0
     for line in lines:
-        for x1, y1, x2, y2 in line:
-            angle.append(np.arctan((y2 - y1) / (x2 - x1)))
-    return np.array(angle)
+        for x0, y0, x1, y1 in line:
+            if (x0 < shape[1]/2) and (x1 < shape[1]/2):
+                line_points_l[l_cnt] = [x0, y0, x1, y1]
+                l_cnt += 1
+            elif (x0 > shape[1]/2) and (x1 > shape[1]/2):
+                line_points_r[r_cnt] = [x0, y0, x1, y1]
+                r_cnt += 1
+
+    # cut off extra rows
+    line_points_l = np.resize(line_points_l, (l_cnt, 4))
+    line_points_r = np.resize(line_points_r, (r_cnt, 4))
+    return line_points_l, line_points_r
 
 
-def line_params(lines, y_intersect):
+def fit_line(lines, shape):
     """
-    REWRITE
-    lines are input data in format [x1, y1, x2, y2];
-    result is angle between line and OX axis
+    Function to find the line which fits points in lines variable
+    TODO:
+          Would be nice to use LineIterator but it's not built in OpenCV3 for Python
+          Probably slow line generation and can be replaced by
+          https://stackoverflow.com/questions/32328179/opencv-3-0-python-lineiterator
+    :param lines: multiple line we would like to fit with one line
+    :param shape: shape of the picture to get rid off calculating max and min
+    :return line:
     """
-    params = []
+    color = 255
+    thickness = 1
+
+    img = np.zeros((shape[0], shape[1]), dtype=np.uint8)
     for line in lines:
-        for x1, y1, x2, y2 in line:
-            k = (y2 - y1) / (x2 - x1)
-            b = (x1 * y2 - x2 * y1) / (x2 - x1)
-            params.append([np.arctan(k), (y_intersect - b) / k])
-    return np.array(params)
+        cv2.line(img, (line[0], line[1]), (line[2], line[3]), color, thickness)
+
+    # find non zero points (line points) and get it as array with .shape = (n, 2) to feed into cv2.fitLine
+    points = np.transpose(np.array(np.nonzero(img)))
+    line = cv2.fitLine(points, cv2.DIST_L2, 0, 2, 0.01)
+
+    return line
 
 
-def get_x_coords(data, center):
+def fit_line_roi(line, shape, y_top):
     """
-    function to find median around 2 peask in histogram
-    :param data:
-    :return:
+    Convert line in "plotted" format and cut to ROI area
+    :param line: line in cv2.fitLine() output format (orthogonal vector to line and point on line)
+    :param shape: shape of picture
+    :param y_top: top bound of ROI
+    :return: line in common format [x0, y0, x1, y1]
     """
-    (binvals, binrange) = np.histogram(data[:, 0])[:2]
-    ind_max = np.argmax(binvals)
-    binvals[ind_max] = 0
-    ind_list = [ind_max, np.argmax(binvals)]
-    return 0
+
+    epsilon = 0.0001
+
+    # if slope of the line is too small, we just assume it is a vertical one
+    # (avoiding division by zero)
+    if abs(line[0]) < epsilon:
+        x_bot = line[3]
+        x_top = line[3]
+    else:
+        t_bot = float((shape[1] - line[2]) / line[0])
+        x_bot = int(t_bot * line[1] + line[3])
+        t_top = float((y_top - line[2]) / line[0])
+        x_top = int(t_top * line[1] + line[3])
+
+    return np.array([x_bot, shape[1], x_top, y_top])
 
 
+def process_image(img):
+    """
+    Function to process image and put lane markers on it as output
+    :param img:
+    :return: img:
+    """
 
-# reading in an image
-# сделать выше цикл чтения по всем картинкам
+    shape = img.shape
 
-dir  = '../CarND-LaneLines-P1/test_images/'
-list = os.listdir(dir)
+    gray = grayscale(img)
 
-image_path = os.path.join(dir, list[4])
-print(list[2])
-#image_path = '../CarND-LaneLines-P1/test_images/solidWhiteRight.jpg'
+    # VISUALIZATION FOR REPORT
+    # cv2.imwrite('report_images/gray.png', gray)
 
-image = mpimg.imread(image_path)
-shape = image.shape
-# plt.imshow(image)
-# plt.show()
+    # Gauss smoothing
+    kernel_size = 3
+    blur_gray = gaussian_blur(gray, kernel_size)
 
-# конвертируем в ЧБ
-gray = grayscale(image)
+    # Canny edge detector
+    low_threshold = 150
+    high_threshold = 300
+    edges = canny(blur_gray, low_threshold, high_threshold)
 
-# проходимся ядром гауса по картинке
-kernel_size = 3
-blur_gray = gaussian_blur(gray, kernel_size)
+    # VISUALIZATION FOR REPORT
+    # cv2.imwrite('report_images/edges.png', edges)
 
+    # Cutting off ROI
+    height_cut = 0.6
+    width_cut  = 0.45
+    cut_height = int(shape[0] * height_cut)
+    cut_width_left = int(shape[1] * width_cut)
+    cut_width_right = shape[1] - cut_width_left
 
-# берем границы алгоритмом Canny (было 50, 150)
-low_threshold = 150
-high_threshold = 300
-edges = canny(blur_gray, low_threshold, high_threshold)
+    cut_point_left = (cut_width_left, cut_height)
+    cut_point_right = (cut_width_right, cut_height)
+    vertices = np.array([[(0, shape[0]), cut_point_left, cut_point_right, (shape[1], shape[0])]], dtype=np.int32)
+    masked_edges = region_of_interest(edges, vertices)
 
-# plt.imshow(edges, cmap='Greys_r')
-# plt.show()
+    # VISUALIZATION FOR REPORT
+    # cv2.imwrite('report_images/masked_edges.png', masked_edges)
 
+    # Hough transform
+    rho = 2
+    theta = 1
+    threshold = 20
+    min_line_len = 10
+    max_line_gap = 15
+    lines = hough_lines(masked_edges, rho, theta, threshold, min_line_len, max_line_gap)
 
-# Отрезаем нужную область
-imshape = image.shape
-vertices = np.array([[(0,imshape[0]),(450, 320), (490, 320), (imshape[1],imshape[0])]], dtype=np.int32)
-masked_edges = region_of_interest(edges, vertices)
+    # VISUALIZATION FOR REPORT
+    # Hough transform visualisation
+    # line_img = hough_lines_visualize(lines, shape)
+    # cv2.imwrite('report_images/combo_hough.png', cv2.cvtColor(line_img, cv2.COLOR_RGB2BGR))
+    # combo = weighted_img(img, line_img, 1, 0.5)
+    # cv2.imwrite('report_images/combo_hough2.png', cv2.cvtColor(combo, cv2.COLOR_RGB2BGR))
 
-# plt.imshow(masked_edges, cmap='Greys_r')
-# plt.show()
+    # Get 2 classes of points, for left line and right line
+    points_by_sides = separate_line_points(lines, shape)
 
+    # VISUALIZATION FOR REPORT
+    # t_img = np.zeros_like(img)
+    # draw_lines(t_img, [points_by_sides[0]])
+    # cv2.imwrite('report_images/left_side.png', cv2.cvtColor(t_img, cv2.COLOR_RGB2BGR))
+    # t_img = np.zeros_like(img)
+    # draw_lines(t_img, [points_by_sides[1]])
+    # cv2.imwrite('report_images/right_side.png', cv2.cvtColor(t_img, cv2.COLOR_RGB2BGR))
 
-# Проделываем преобразование Хафа и рисуем линии
-rho = 2
-theta = 1
-threshold = 20
-min_line_len = 10
-max_line_gap = 15
-line_img, lines = hough_lines(masked_edges, rho, theta, threshold, min_line_len, max_line_gap)
+    for side in points_by_sides:
+        if len(side) >= 1:
+            line = fit_line(side, shape)
+            line_in_roi = fit_line_roi(line, shape, cut_height)
+            img = draw_weighted_line(img, line_in_roi)
 
-# plt.imshow(line_img)
-# plt.show()
+    # VISUALIZATION FOR REPORT
+    cv2.imwrite('report_images/result.png', cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
 
-# Накладываем картинки
-color_edges = np.dstack((edges, edges, edges))
-combo = weighted_img(color_edges, line_img)
-
-# plt.imshow(combo)
-# plt.show()
-
-# Тестовая часть
-# Тут я тестирую и играюсь!
-
-
-params = line_params(lines, -shape[0])
-
-(angle_hist, angle_bins) = np.histogram(params[:, 0])[:2]
-print(np.argmax(angle_hist))
-angle_hist[0] = 0
-print(np.argmax(angle_hist))
-
-
-print(angle_hist)
-print(angle_bins)
+    return img
 
 
-(x_hist, x_bins) = np.histogram(params[:, 1])[:2]
-print(x_hist)
-print(x_bins)
+def get_list_of_files(dir_path):
+    """
+    Get list of images in folder 'folder_name'
+    :param dir_path:
+    :return: list_of_paths:
+    """
+    file_list = os.listdir(dir_path)
+    list_of_paths = [os.path.join(dir_path, file) for file in file_list]
 
-print(params[:, 1], shape[1])
-print(params[:, 1] > shape[1]/2)
+    return list_of_paths
 
-#np.argpartition(a, -4)[-4:]
-#>>> a
-#array([9, 4, 4, 3, 3, 9, 0, 4, 6, 0])
-#>>> ind = np.argpartition(a, -4)[-4:]
-#>>> ind
-#array([1, 5, 8, 0])
-#>>> a[ind]
-#array([4, 9, 6, 9])
 
-#((25 < a) & (a < 100)).sum()
+# Image Processing
+image_dir_path = 'test_images/'
+image_list = get_list_of_files(image_dir_path)
+image = mpimg.imread(image_list[0])
+res_image = process_image(image)
+plt.imshow(res_image)
+plt.show()
+
+# Video Processing
+# To speed up the testing process you may want to try your pipeline on a shorter subclip of the video
+# To do so add .subclip(start_second,end_second) to the end of the line below
+# Where start_second and end_second are integer values representing the start and end of the subclip
+# You may also uncomment the following line for a subclip of the first 5 seconds
+# clip3 = VideoFileClip('test_videos/challenge.mp4').subclip(0,5)
+
+# output = 'test_videos_output/solidWhiteRight.mp4'
+# clip3 = VideoFileClip('test_videos/solidWhiteRight.mp4')
+
+# output = 'test_videos_output/solidYellowLeft.mp4'
+# clip3 = VideoFileClip('test_videos/solidYellowLeft.mp4')
+
+# output = 'test_videos_output/challenge.mp4'
+# clip3 = VideoFileClip('test_videos/challenge.mp4')
+
+# clip = clip3.fl_image(process_image)
+# clip.write_videofile(output, audio=False)
