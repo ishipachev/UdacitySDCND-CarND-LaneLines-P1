@@ -35,20 +35,26 @@ After this I used Canny edge detection algorithm to get edges:
 ![alt_text][image_edges]
 
 I cutted the edges to some region of interes which supposed to be part of picture with the road we mostly interested in:
+
 ![alt_text][image_masked_edges]
 
 After this I performed Hough transform to detect lines consisted of points I've found via canny edge detection at previous step:
+
 ![alt_text][image_hough]
 Same points but on source picture:
+
 ![alt_text][image_hough2]
 
 In order to separate lines by their side i've sorted them just by middle vertical line. If points of line lies on the left side of the picture than I save it as a part of left line. Same for right line. So after this simple separation algorithm I got a tuple with 2 arrays: for left line and right line:
+
 ![alt_text][image_left_side]
+
 ![alt_text][image_right_side]
 
 Next step was to find appropriate line approximation for these points, for each side. First, I put points belong to all lines I've got at Hough transform in order to increase accuracy, becouse Hough transform gives us only 2 point for line, but not the line points themself.
 Last calculation stage was to calculate L2 approximation for all these points via default algorithm of line fitting. 
 I did a couple transfromations to `cv2.fitLine` output to prepare line for image output and to fit it in our region of interes. As result I got:
+
 ![alt_text][image_result]
 
 
